@@ -7,6 +7,7 @@ from inaproc_ws_scraper import (
     extract_page_info_from_payload,
     extract_tables_from_payload,
     flatten_result,
+    iter_scrape_listing_pages,
     parse_kode_lines,
     scrape_with_retries,
 )
@@ -124,6 +125,13 @@ class InaprocWsScraperTest(unittest.TestCase):
         self.assertEqual(result["kode"], "64228258")
         self.assertEqual(result["status"], "error")
         self.assertIn("boom 64228258", result["error"])
+
+    def test_iter_scrape_listing_pages_rejects_invalid_start_page(self):
+        async def collect():
+            return [page async for page in iter_scrape_listing_pages(pages=1, start_page=0)]
+
+        with self.assertRaises(ValueError):
+            asyncio.run(collect())
 
 
 if __name__ == "__main__":

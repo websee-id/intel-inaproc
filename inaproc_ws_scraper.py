@@ -355,8 +355,25 @@ async def scrape_listing_pages(
     page_size: int = 100,
     start_page: int = 1,
 ) -> list[dict[str, Any]]:
+    return [
+        page_result
+        async for page_result in iter_scrape_listing_pages(
+            pages=pages,
+            timeout=timeout,
+            page_size=page_size,
+            start_page=start_page,
+        )
+    ]
+
+
+async def iter_scrape_listing_pages(
+    pages: int = 1,
+    timeout: float = 20.0,
+    page_size: int = 100,
+    start_page: int = 1,
+):
     if pages < 1:
-        return []
+        return
     if start_page < 1:
         raise ValueError("start_page must be >= 1")
 
@@ -371,7 +388,6 @@ async def scrape_listing_pages(
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
-    results = []
     async with websockets.connect(
         STREAM_URL,
         additional_headers=headers,
@@ -385,15 +401,14 @@ async def scrape_listing_pages(
             await ws.send(build_entry_per_page_message(page_size))
         page_result = await _read_listing_page(ws, 1, timeout)
         if start_page == 1:
-            results.append(page_result)
+            yield page_result
         for page in range(2, end_page + 1):
             await ws.send(build_button_click_message(NEXT_PAGE_WIDGET_ID))
             page_result = await _read_listing_page(ws, page, timeout)
             if page >= start_page:
-                results.append(page_result)
+                yield page_result
             if page_result.get("status") != "ok":
                 break
-    return results
 
 
 async def scrape_with_retries(

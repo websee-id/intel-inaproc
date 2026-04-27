@@ -4,7 +4,7 @@ __pycache__/
 *.sqlite-*
 .playwright-mcp/
 archives/
+logs/
 browser_fallback_report.json
 .env
 .env.*
-

@@ -18,7 +18,7 @@ from inaproc_pipeline import (
     row_hash,
     utc_now,
 )
-from inaproc_ws_scraper import scrape_detail, scrape_listing_pages
+from inaproc_ws_scraper import iter_scrape_listing_pages, scrape_detail, scrape_listing_pages
 
 
 LISTING_COPY_COLUMNS = [
@@ -720,22 +720,32 @@ async def run_seed_listing_file(args: argparse.Namespace) -> dict[str, Any]:
     try:
         pages = listing_page_range(args.max_pages, start_page=args.start_page, end_page=args.end_page)
         if pages:
-            page_results = await scrape_listing_pages(
+            async for page_result in iter_scrape_listing_pages(
                 len(pages),
                 timeout=args.timeout,
                 page_size=args.page_size,
                 start_page=pages[0],
-            )
-        else:
-            page_results = []
-        for page_result in page_results:
-            stats["pages"] += 1
-            if page_result.get("status") != "ok":
-                stats["errors"] += 1
-                continue
-            stats["rows"] += write_listing_seed_page(output, page_result)
-            if args.rate_delay:
-                await asyncio.sleep(args.rate_delay)
+            ):
+                stats["pages"] += 1
+                if page_result.get("status") != "ok":
+                    stats["errors"] += 1
+                    continue
+                stats["rows"] += write_listing_seed_page(output, page_result)
+                print(
+                    json.dumps(
+                        {
+                            "event": "seed-page",
+                            "page": page_result["page"],
+                            "rows": len(page_result["rows"]),
+                            "total_rows": stats["rows"],
+                            "total_pages": page_result.get("total_pages"),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                if args.rate_delay:
+                    await asyncio.sleep(args.rate_delay)
     except Exception as exc:  # noqa: BLE001 - command returns operational failure.
         stats["status"] = "error"
         stats["error"] = str(exc)
