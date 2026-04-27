@@ -70,6 +70,13 @@ def log_paths_for_job(job: dict) -> list[Path]:
     return paths
 
 
+def job_priority(job: dict) -> tuple[int, int, int, str]:
+    start_page = int(job.get("start_page") or 1)
+    total_pages = int(job.get("total_pages") or 0)
+    is_instansi = 0 if job.get("instansi") else 1
+    return (start_page, is_instansi, total_pages, job["name"])
+
+
 def base_shards() -> list[dict]:
     jobs = []
     for jenis in ["1", "2", "3", "4", "5"]:
@@ -107,7 +114,7 @@ def incomplete_jobs() -> list[dict]:
             continue
         job = {**job, **state, "start_page": max(1, (state["page"] or 0) + 1)}
         jobs.append(job)
-    return jobs
+    return sorted(jobs, key=job_priority)
 
 
 def launch(job: dict) -> subprocess.Popen:
