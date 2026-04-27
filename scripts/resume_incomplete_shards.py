@@ -44,6 +44,32 @@ def parse_log(path: Path) -> dict:
     return {"page": page, "total_pages": total_pages, "complete": complete, "status": status, "errors": errors, "rows": rows, "empty": empty}
 
 
+def merge_log_states(paths: list[Path]) -> dict:
+    states = [parse_log(path) for path in paths if path.exists()]
+    if not states:
+        return {"page": 0, "total_pages": 0, "complete": False, "status": None, "errors": 0, "rows": 0, "empty": False}
+    total_pages = max((state.get("total_pages") or 0) for state in states)
+    page = max((state.get("page") or 0) for state in states)
+    complete = any(state.get("complete") for state in states) or bool(total_pages and page >= total_pages)
+    empty = all(state.get("empty") for state in states if state.get("status")) and not page
+    best = max(states, key=lambda state: (state.get("page") or 0, state.get("rows") or 0))
+    return {
+        "page": page,
+        "total_pages": total_pages,
+        "complete": complete,
+        "status": best.get("status"),
+        "errors": best.get("errors") or 0,
+        "rows": max((state.get("rows") or 0) for state in states),
+        "empty": empty,
+    }
+
+
+def log_paths_for_job(job: dict) -> list[Path]:
+    paths = [job["log_dir"] / f"{job['name']}.log"]
+    paths.extend(sorted(RESUME_LOG_DIR.glob(f"{job['name']}-from-*.log")))
+    return paths
+
+
 def base_shards() -> list[dict]:
     jobs = []
     for jenis in ["1", "2", "3", "4", "5"]:
@@ -70,7 +96,7 @@ def instansi_shards() -> list[dict]:
 def incomplete_jobs() -> list[dict]:
     jobs = []
     for job in base_shards() + instansi_shards():
-        state = parse_log(job["log_dir"] / f"{job['name']}.log")
+        state = merge_log_states(log_paths_for_job(job))
         if state["empty"]:
             continue
         if state["complete"]:
