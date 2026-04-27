@@ -395,6 +395,31 @@ def reset_stale_processing_pg(conn: psycopg.Connection, older_than: str) -> int:
     return count
 
 
+async def scrape_detail_with_retries(
+    kode: str,
+    sumber: str | None,
+    timeout: float,
+    retries: int,
+    retry_delay: float,
+    scraper=scrape_detail,
+) -> dict[str, Any]:
+    last_result: dict[str, Any] | None = None
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            result = await scraper(kode, timeout=timeout, sumber=sumber)
+            if result.get("status") == "ok":
+                return result
+            last_result = result
+        except Exception as exc:  # noqa: BLE001 - caller records final per-code failure.
+            last_error = exc
+        if attempt < retries:
+            await asyncio.sleep(min(retry_delay * (2**attempt), 10))
+    if last_result is not None:
+        return last_result
+    return {"kode": kode, "status": "error", "error": str(last_error)}
+
+
 def set_checkpoint_pg(conn: psycopg.Connection, job_name: str, state: dict[str, Any]) -> None:
     with conn.cursor() as cur:
         cur.execute(
@@ -484,10 +509,13 @@ async def run_detail_worker_pg(args: argparse.Namespace) -> dict[str, Any]:
         kode = job["kode_rup"]
         sumber = job.get("sumber") or None
         async with semaphore:
-            try:
-                return kode, await scrape_detail(kode, timeout=args.timeout, sumber=sumber)
-            except Exception as exc:  # noqa: BLE001 - worker records per-code failure.
-                return kode, {"kode": kode, "status": "error", "error": str(exc)}
+            return kode, await scrape_detail_with_retries(
+                kode,
+                sumber=sumber,
+                timeout=args.timeout,
+                retries=args.retries,
+                retry_delay=args.retry_delay,
+            )
 
     for kode, result in await asyncio.gather(*(run_one(job) for job in jobs)):
         mark_detail_result_pg(conn, kode, result, worker_id)
@@ -523,6 +551,8 @@ def main() -> None:
     worker.add_argument("--limit", type=int, default=500)
     worker.add_argument("--concurrency", type=int, default=5)
     worker.add_argument("--timeout", type=float, default=20.0)
+    worker.add_argument("--retries", type=int, default=2)
+    worker.add_argument("--retry-delay", type=float, default=1.0)
 
     report = sub.add_parser("report-queue")
     report.add_argument("--sample-limit", type=int, default=10)
