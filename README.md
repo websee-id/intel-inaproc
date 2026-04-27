@@ -17,11 +17,23 @@ Keep `DATABASE_URL` in the environment. Do not commit database credentials.
 ```bash
 python3 inaproc_pg_pipeline.py init-db
 
-python3 inaproc_pg_pipeline.py daily-listing \
-  --max-pages 100 \
+python3 inaproc_pg_pipeline.py seed-listing-file \
+  --output archives/rup-full/listing.jsonl \
+  --max-pages 42244 \
   --page-size 100 \
-  --resume \
-  --archive-dir archives/rup
+  --truncate
+
+python3 inaproc_pg_pipeline.py prepare-listing-copy \
+  --input archives/rup-full/listing.jsonl \
+  --output archives/rup-full/listing-copy.csv
+
+python3 inaproc_pg_pipeline.py bulk-load-listing \
+  --input archives/rup-full/listing-copy.csv
+
+python3 inaproc_pg_pipeline.py daily-listing \
+  --max-pages 300 \
+  --page-size 100 \
+  --archive-dir archives/rup-incremental
 
 python3 inaproc_pg_pipeline.py detail-worker \
   --worker-id worker-01 \

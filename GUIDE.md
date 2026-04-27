@@ -37,29 +37,42 @@ python3 inaproc_pg_pipeline.py init-db
 
 Run this once to seed the main listing table and fill the detail queue.
 
+For the full seed, use the file-first path. It avoids millions of small PostgreSQL round trips:
+
+```text
+WebSocket listing -> JSONL file -> COPY CSV -> PostgreSQL bulk load
+```
+
 ```bash
-python3 inaproc_pg_pipeline.py daily-listing \
+python3 inaproc_pg_pipeline.py seed-listing-file \
+  --output archives/rup-full-seed/listing.jsonl \
   --max-pages 42244 \
   --page-size 100 \
-  --archive-dir archives/rup-full-seed \
-  --rate-delay 0.2 \
-  --timeout 20
+  --timeout 20 \
+  --truncate
+
+python3 inaproc_pg_pipeline.py prepare-listing-copy \
+  --input archives/rup-full-seed/listing.jsonl \
+  --output archives/rup-full-seed/listing-copy.csv
+
+python3 inaproc_pg_pipeline.py bulk-load-listing \
+  --input archives/rup-full-seed/listing-copy.csv
 ```
 
 Notes:
 
 - Current observed size is about `42,244` pages at `100` rows/page, around `4.22M` listing rows.
-- `--archive-dir` writes JSONL page archives for audit/replay.
-- `--rate-delay 0.2` is a conservative delay between processed pages.
-- If the full seed stops, resume from the checkpoint:
+- `seed-listing-file` writes one JSONL record per listing row.
+- `prepare-listing-copy` converts JSONL to a PostgreSQL `COPY` CSV.
+- `bulk-load-listing` loads into `rup_listing` and enqueues detail jobs.
+- If the full seed stops, rerun `seed-listing-file` with `--start-page` set to the next page and omit `--truncate`.
 
 ```bash
-python3 inaproc_pg_pipeline.py daily-listing \
-  --max-pages 42244 \
+python3 inaproc_pg_pipeline.py seed-listing-file \
+  --output archives/rup-full-seed/listing.jsonl \
+  --start-page 10001 \
+  --max-pages 32244 \
   --page-size 100 \
-  --resume \
-  --archive-dir archives/rup-full-seed \
-  --rate-delay 0.2 \
   --timeout 20
 ```
 
@@ -94,7 +107,7 @@ python3 inaproc_pg_pipeline.py daily-listing \
 
 Practical recommendation:
 
-- Full seed: use `--resume`.
+- Full seed: use `seed-listing-file` -> `prepare-listing-copy` -> `bulk-load-listing`.
 - Recurring freshness scan: start from page 1 unless you specifically want a rolling sweep.
 - Run a deeper rolling sweep daily or weekly if you need stronger backfill guarantees.
 
