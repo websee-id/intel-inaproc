@@ -316,10 +316,19 @@ async def _read_listing_page(
     matched_at: float | None = None
 
     while asyncio.get_event_loop().time() < deadline:
-        remaining = max(0.1, deadline - asyncio.get_event_loop().time())
+        now = asyncio.get_event_loop().time()
+        remaining = max(0.1, deadline - now)
+        recv_timeout = remaining
+        if matched_at and last_listing:
+            settle_remaining = settle_seconds - (now - matched_at)
+            if settle_remaining <= 0:
+                break
+            recv_timeout = min(remaining, max(0.1, settle_remaining))
         try:
-            message = await asyncio.wait_for(ws.recv(), timeout=remaining)
+            message = await asyncio.wait_for(ws.recv(), timeout=recv_timeout)
         except TimeoutError:
+            if matched_at and last_listing:
+                break
             break
         payload = message.encode("utf-8") if isinstance(message, str) else message
         for table in extract_tables_from_payload(payload):
