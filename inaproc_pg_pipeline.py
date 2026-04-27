@@ -718,12 +718,14 @@ async def run_seed_listing_file(args: argparse.Namespace) -> dict[str, Any]:
     listing_filters = effective_listing_filters(
         tahun=args.tahun,
         jenis_klpd=args.jenis_klpd,
+        instansi=args.instansi,
         sumber=args.sumber,
         sumber_dana=args.sumber_dana,
     )
     query_string = build_listing_query(
         tahun=listing_filters.get("tahun"),
         jenis_klpd=listing_filters.get("jenis_klpd"),
+        instansi=listing_filters.get("instansi"),
         sumber=listing_filters.get("sumber"),
         sumber_dana=listing_filters.get("sumber_dana"),
     )
@@ -838,6 +840,7 @@ def main() -> None:
     seed_file.add_argument("--truncate", action="store_true")
     seed_file.add_argument("--tahun")
     seed_file.add_argument("--jenis-klpd", choices=["1", "2", "3", "4", "5"])
+    seed_file.add_argument("--instansi")
     seed_file.add_argument("--sumber", choices=["Penyedia", "Swakelola"])
     seed_file.add_argument("--sumber-dana", choices=["APBN", "APBNP", "APBD", "APBDP", "PHLN", "PNBP", "BLUD", "GABUNGAN", "LAINNYA"])
 

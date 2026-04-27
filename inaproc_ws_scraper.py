@@ -95,6 +95,7 @@ def _app_url(query_string: str = "") -> str:
 def build_listing_query(
     tahun: str | None = None,
     jenis_klpd: str | int | None = None,
+    instansi: str | None = None,
     sumber: str | None = None,
     sumber_dana: str | None = None,
 ) -> str:
@@ -103,6 +104,8 @@ def build_listing_query(
         params["tahun"] = str(tahun)
     if jenis_klpd:
         params["jenis_klpd"] = str(jenis_klpd)
+    if instansi:
+        params["instansi"] = instansi
     if sumber:
         params["sumber"] = sumber
     if sumber_dana:
@@ -113,12 +116,14 @@ def build_listing_query(
 def effective_listing_filters(
     tahun: str | None = None,
     jenis_klpd: str | int | None = None,
+    instansi: str | None = None,
     sumber: str | None = None,
     sumber_dana: str | None = None,
 ) -> dict[str, str]:
     filters = {
         "tahun": str(tahun) if tahun else "",
         "jenis_klpd": str(jenis_klpd) if jenis_klpd else "",
+        "instansi": instansi or "",
         "sumber": sumber or "",
         "sumber_dana": sumber_dana or "",
     }
@@ -671,6 +676,7 @@ def main() -> None:
     parser.add_argument("--start-page", type=int, default=1, help="First listing page to emit when using --list-pages.")
     parser.add_argument("--tahun", help="Listing filter, e.g. 2026.")
     parser.add_argument("--jenis-klpd", choices=["1", "2", "3", "4", "5"], help="Listing filter: 1 Kementerian, 2 Lembaga, 3 Provinsi, 4 Kabupaten, 5 Kota.")
+    parser.add_argument("--instansi", help="Listing filter by INAPROC instansi code, e.g. D108.")
     parser.add_argument("--sumber", choices=["Penyedia", "Swakelola"], help="Listing filter for Cara Pengadaan.")
     parser.add_argument("--sumber-dana", choices=["APBN", "APBNP", "APBD", "APBDP", "PHLN", "PNBP", "BLUD", "GABUNGAN", "LAINNYA"], help="Listing filter for Sumber Dana.")
     args = parser.parse_args()
@@ -678,12 +684,14 @@ def main() -> None:
         listing_filters = effective_listing_filters(
             tahun=args.tahun,
             jenis_klpd=args.jenis_klpd,
+            instansi=args.instansi,
             sumber=args.sumber,
             sumber_dana=args.sumber_dana,
         )
         query_string = build_listing_query(
             tahun=listing_filters.get("tahun"),
             jenis_klpd=listing_filters.get("jenis_klpd"),
+            instansi=listing_filters.get("instansi"),
             sumber=listing_filters.get("sumber"),
             sumber_dana=listing_filters.get("sumber_dana"),
         )

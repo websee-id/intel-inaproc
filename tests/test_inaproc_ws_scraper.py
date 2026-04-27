@@ -107,16 +107,17 @@ class InaprocWsScraperTest(unittest.TestCase):
         query = build_listing_query(
             tahun="2026",
             jenis_klpd="4",
+            instansi="D108",
             sumber="Penyedia",
             sumber_dana="APBD",
         )
 
-        self.assertEqual(query, "tahun=2026&jenis_klpd=4&sumber=Penyedia&sumber_dana=APBD")
+        self.assertEqual(query, "tahun=2026&jenis_klpd=4&instansi=D108&sumber=Penyedia&sumber_dana=APBD")
 
     def test_effective_listing_filters_omit_default_tahun(self):
         self.assertEqual(
-            effective_listing_filters(tahun="2026", jenis_klpd="4", sumber_dana="APBD"),
-            {"jenis_klpd": "4", "sumber_dana": "APBD"},
+            effective_listing_filters(tahun="2026", jenis_klpd="4", instansi="D108", sumber_dana="APBD"),
+            {"jenis_klpd": "4", "instansi": "D108", "sumber_dana": "APBD"},
         )
         self.assertEqual(effective_listing_filters(tahun="2025"), {"tahun": "2025"})
 
