@@ -6,6 +6,7 @@ from pathlib import Path
 
 from inaproc_pg_pipeline import (
     build_dsn,
+    dedupe_listing_seed_files,
     detail_queue_claim_sql,
     iter_listing_seed_records,
     listing_seed_to_copy_rows,
@@ -73,6 +74,61 @@ class InaprocPgPipelineTest(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(records[0]["page"], 2)
         self.assertEqual(records[0]["Kode RUP"], "123")
+
+    def test_write_listing_seed_page_can_skip_seen_kode_rup(self):
+        page = {
+            "page": 2,
+            "total_pages": 9,
+            "status": "ok",
+            "rows": [
+                {"Kode RUP": "123", "Nama Paket": "Paket A", "Cara Pengadaan": "Penyedia"},
+                {"Kode RUP": "124", "Nama Paket": "Paket B", "Cara Pengadaan": "Penyedia"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "seed.jsonl"
+            seen = {"123"}
+            count = write_listing_seed_page(path, page, seen_kodes=seen)
+            records = list(iter_listing_seed_records(path))
+
+        self.assertEqual(count, 1)
+        self.assertEqual(seen, {"123", "124"})
+        self.assertEqual(records[0]["Kode RUP"], "124")
+
+    def test_dedupe_listing_seed_files_writes_unique_records_by_kode_rup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            first = Path(tmpdir) / "first.jsonl"
+            second = Path(tmpdir) / "second.jsonl"
+            output = Path(tmpdir) / "deduped.jsonl"
+            first.write_text(
+                "\n".join(
+                    [
+                        '{"Kode RUP":"123","Nama Paket":"Paket A"}',
+                        '{"Kode RUP":"124","Nama Paket":"Paket B"}',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            second.write_text(
+                "\n".join(
+                    [
+                        '{"Kode RUP":"123","Nama Paket":"Paket A duplicate"}',
+                        '{"Kode RUP":"","Nama Paket":"Bad"}',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            stats = dedupe_listing_seed_files([first, second], output)
+            records = list(iter_listing_seed_records(output))
+
+        self.assertEqual(stats["raw"], 4)
+        self.assertEqual(stats["unique"], 2)
+        self.assertEqual(stats["duplicates"], 1)
+        self.assertEqual(stats["bad"], 1)
+        self.assertEqual([record["Kode RUP"] for record in records], ["123", "124"])
 
     def test_listing_seed_to_copy_rows_normalizes_and_skips_missing_kode(self):
         records = [

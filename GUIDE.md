@@ -63,17 +63,32 @@ Notes:
 
 - Current observed size is about `42,244` pages at `100` rows/page, around `4.22M` listing rows.
 - `seed-listing-file` writes one JSONL record per listing row.
+- Do not append retries into a canonical seed file. Write retries into a separate attempt file, then dedupe by `Kode RUP`.
+- `dedupe-listing-files` creates the canonical JSONL used for PostgreSQL load.
 - `prepare-listing-copy` converts JSONL to a PostgreSQL `COPY` CSV.
 - `bulk-load-listing` loads into `rup_listing` and enqueues detail jobs.
-- If the full seed stops, rerun `seed-listing-file` with `--start-page` set to the next page and omit `--truncate`.
+- If the full seed stops, rerun `seed-listing-file` with `--start-page` set to the next page and write to a new attempt file.
 
 ```bash
 python3 inaproc_pg_pipeline.py seed-listing-file \
-  --output archives/rup-full-seed/listing.jsonl \
+  --output archives/rup-full-seed/attempt-from-10001.jsonl \
   --start-page 10001 \
   --max-pages 32244 \
   --page-size 100 \
-  --timeout 20
+  --timeout 20 \
+  --truncate
+```
+
+Merge raw seed/attempt files into one canonical deduped file before preparing CSV:
+
+```bash
+python3 inaproc_pg_pipeline.py dedupe-listing-files \
+  --output archives/rup-full-seed/listing-dedup.jsonl \
+  archives/rup-full-seed/*.jsonl
+
+python3 inaproc_pg_pipeline.py prepare-listing-copy \
+  --input archives/rup-full-seed/listing-dedup.jsonl \
+  --output archives/rup-full-seed/listing-copy.csv
 ```
 
 The listing scraper still navigates Streamlit pages sequentially. For this public WebSocket path, large page jumps are not random access.

@@ -4,12 +4,14 @@ import os
 import re
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 MAX_PARALLEL = int(os.environ.get("MAX_PARALLEL", "20"))
 ROOT = Path(__file__).resolve().parents[1]
 ARCHIVE_DIR = ROOT / "archives" / "rup-sharded-2026"
+ATTEMPT_DIR = ROOT / "archives" / "rup-attempts-2026"
 RESUME_LOG_DIR = ROOT / "logs" / "resume-shards"
 FUNDS = ["APBN", "APBNP", "APBD", "APBDP", "PHLN", "PNBP", "BLUD", "GABUNGAN", "LAINNYA"]
 SOURCES = ["Penyedia", "Swakelola"]
@@ -84,8 +86,10 @@ def incomplete_jobs() -> list[dict]:
 
 def launch(job: dict) -> subprocess.Popen:
     RESUME_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    output = ARCHIVE_DIR / f"{job['name']}.jsonl"
-    log_path = RESUME_LOG_DIR / f"{job['name']}-from-{job['start_page']}.log"
+    ATTEMPT_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    output = ATTEMPT_DIR / f"{job['name']}-from-{job['start_page']}-{stamp}.jsonl"
+    log_path = RESUME_LOG_DIR / f"{job['name']}-from-{job['start_page']}-{stamp}.log"
     cmd = [
         "python3",
         "inaproc_pg_pipeline.py",
@@ -108,6 +112,7 @@ def launch(job: dict) -> subprocess.Popen:
         job["sumber"],
         "--sumber-dana",
         job["dana"],
+        "--truncate",
     ]
     if job.get("instansi"):
         cmd.extend(["--instansi", job["instansi"]])

@@ -147,13 +147,18 @@ def init_pg(conn: psycopg.Connection) -> None:
     conn.commit()
 
 
-def write_listing_seed_page(path: Path, page_result: dict[str, Any]) -> int:
+def write_listing_seed_page(path: Path, page_result: dict[str, Any], seen_kodes: set[str] | None = None) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     if page_result.get("status") != "ok":
         return 0
     with path.open("a", encoding="utf-8") as f:
         count = 0
         for row in page_result.get("rows", []):
+            kode_rup = str(row.get("Kode RUP") or "").strip()
+            if seen_kodes is not None and kode_rup:
+                if kode_rup in seen_kodes:
+                    continue
+                seen_kodes.add(kode_rup)
             record = {"page": page_result["page"], "total_pages": page_result["total_pages"], **row}
             f.write(json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
             count += 1
@@ -168,8 +173,37 @@ def iter_listing_seed_records(path: Path):
                 yield json.loads(line)
 
 
-def listing_seed_to_copy_rows(records, run_id: str):
-    rows = []
+def dedupe_listing_seed_files(inputs: list[Path], output: Path) -> dict[str, int]:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    seen: set[str] = set()
+    stats = {"raw": 0, "unique": 0, "duplicates": 0, "bad": 0}
+    with output.open("w", encoding="utf-8") as out:
+        for path in inputs:
+            with path.open(encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    stats["raw"] += 1
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        stats["bad"] += 1
+                        continue
+                    kode_rup = str(record.get("Kode RUP") or "").strip()
+                    if not kode_rup:
+                        stats["bad"] += 1
+                        continue
+                    if kode_rup in seen:
+                        stats["duplicates"] += 1
+                        continue
+                    seen.add(kode_rup)
+                    out.write(json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
+                    stats["unique"] += 1
+    stats["output"] = str(output)
+    return stats
+
+
+def iter_listing_seed_copy_rows(records, run_id: str):
     now = utc_now()
     for record in records:
         normalized = normalized_row(record)
@@ -177,28 +211,30 @@ def listing_seed_to_copy_rows(records, run_id: str):
         if not kode_rup:
             continue
         row_json = json.dumps(normalized, ensure_ascii=False, sort_keys=True)
-        rows.append(
-            (
-                kode_rup,
-                normalized.get("Nama Instansi", ""),
-                normalized.get("Nama Satuan Kerja", ""),
-                normalized.get("Tahun Anggaran", ""),
-                normalized.get("Cara Pengadaan", ""),
-                normalized.get("Metode Pengadaan", ""),
-                normalized.get("Jenis Pengadaan", ""),
-                normalized.get("Nama Paket", ""),
-                normalized.get("Sumber Dana", ""),
-                normalized.get("Produk Dalam Negeri", ""),
-                normalized.get("Total Nilai (Rp)", ""),
-                row_json,
-                row_hash(normalized),
-                now,
-                now,
-                now,
-                int(normalized.get("page") or 0),
-                run_id,
-            )
+        yield (
+            kode_rup,
+            normalized.get("Nama Instansi", ""),
+            normalized.get("Nama Satuan Kerja", ""),
+            normalized.get("Tahun Anggaran", ""),
+            normalized.get("Cara Pengadaan", ""),
+            normalized.get("Metode Pengadaan", ""),
+            normalized.get("Jenis Pengadaan", ""),
+            normalized.get("Nama Paket", ""),
+            normalized.get("Sumber Dana", ""),
+            normalized.get("Produk Dalam Negeri", ""),
+            normalized.get("Total Nilai (Rp)", ""),
+            row_json,
+            row_hash(normalized),
+            now,
+            now,
+            now,
+            int(normalized.get("page") or 0),
+            run_id,
         )
+
+
+def listing_seed_to_copy_rows(records, run_id: str):
+    return list(iter_listing_seed_copy_rows(records, run_id))
     return rows
 
 
@@ -207,7 +243,7 @@ def write_listing_seed_copy_csv(jsonl_path: Path, csv_path: Path, run_id: str) -
     count = 0
     with csv_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        for row in listing_seed_to_copy_rows(iter_listing_seed_records(jsonl_path), run_id):
+        for row in iter_listing_seed_copy_rows(iter_listing_seed_records(jsonl_path), run_id):
             writer.writerow(row)
             count += 1
     return count
@@ -794,6 +830,12 @@ def run_bulk_load_listing(args: argparse.Namespace) -> dict[str, Any]:
     return {"status": "ok", **stats}
 
 
+def run_dedupe_listing_files(args: argparse.Namespace) -> dict[str, Any]:
+    inputs = [Path(value) for value in args.inputs]
+    stats = dedupe_listing_seed_files(inputs, Path(args.output))
+    return {"status": "ok", **stats}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="INAPROC PostgreSQL scraper pipeline for multi-worker runs.")
     parser.add_argument("--dsn", help="PostgreSQL DSN. Prefer DATABASE_URL env instead of shell history.")
@@ -852,6 +894,10 @@ def main() -> None:
     bulk_load = sub.add_parser("bulk-load-listing")
     bulk_load.add_argument("--input", required=True)
 
+    dedupe_files = sub.add_parser("dedupe-listing-files")
+    dedupe_files.add_argument("--output", required=True)
+    dedupe_files.add_argument("inputs", nargs="+")
+
     args = parser.parse_args()
     if args.cmd == "init-db":
         dsn = build_dsn(args.dsn)
@@ -884,6 +930,8 @@ def main() -> None:
         print(json.dumps(run_prepare_listing_copy(args), ensure_ascii=False, indent=2))
     elif args.cmd == "bulk-load-listing":
         print(json.dumps(run_bulk_load_listing(args), ensure_ascii=False, indent=2))
+    elif args.cmd == "dedupe-listing-files":
+        print(json.dumps(run_dedupe_listing_files(args), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
