@@ -8,6 +8,7 @@ from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import websockets
 
@@ -17,6 +18,24 @@ APP_URL = "https://data.inaproc.id/rup"
 PAGE_SCRIPT_HASH = "cf49de8dce0882063532bfe93fe34a29"
 NEXT_PAGE_WIDGET_ID = "$$ID-ca8f81b90b63b495f6603fe5090838d2-None"
 ENTRY_PER_PAGE_WIDGET_ID = "$$ID-7ffea71d800559f7b6f8922dca5b713e-None"
+TAHUN_WIDGET_ID = "$$ID-865b4ac13685d129b5c95b48fca4990a-None"
+JENIS_KLPD_WIDGET_ID = "$$ID-300b63c2241c35c8aeeee621c202f3f5-None"
+CARA_PENGADAAN_WIDGET_ID = "$$ID-adc099fb56d35441d8fec9c51f2de628-None"
+SUMBER_DANA_WIDGET_ID = "$$ID-532e3e12f0242b2b67367be2c65a17a6-None"
+JENIS_KLPD_VALUES = {
+    "1": "Kementerian",
+    "2": "Lembaga",
+    "3": "Provinsi",
+    "4": "Kabupaten",
+    "5": "Kota",
+}
+JENIS_KLPD_PREFIXES = {
+    "1": ("KEMENTERIAN",),
+    "2": ("LEMBAGA",),
+    "3": ("PROVINSI",),
+    "4": ("KAB.", "KABUPATEN"),
+    "5": ("KOTA",),
+}
 
 
 def _varint(value: int) -> bytes:
@@ -69,22 +88,61 @@ def build_rerun_message(kode: str, page: str = "rup", sumber: str | None = None)
     return _field_bytes(11, rerun)
 
 
-def build_main_page_message() -> bytes:
+def _app_url(query_string: str = "") -> str:
+    return f"{APP_URL}?{query_string}" if query_string else APP_URL
+
+
+def build_listing_query(
+    tahun: str | None = None,
+    jenis_klpd: str | int | None = None,
+    sumber: str | None = None,
+    sumber_dana: str | None = None,
+) -> str:
+    params: dict[str, str] = {}
+    if tahun:
+        params["tahun"] = str(tahun)
+    if jenis_klpd:
+        params["jenis_klpd"] = str(jenis_klpd)
+    if sumber:
+        params["sumber"] = sumber
+    if sumber_dana:
+        params["sumber_dana"] = sumber_dana
+    return urlencode(params)
+
+
+def effective_listing_filters(
+    tahun: str | None = None,
+    jenis_klpd: str | int | None = None,
+    sumber: str | None = None,
+    sumber_dana: str | None = None,
+) -> dict[str, str]:
+    filters = {
+        "tahun": str(tahun) if tahun else "",
+        "jenis_klpd": str(jenis_klpd) if jenis_klpd else "",
+        "sumber": sumber or "",
+        "sumber_dana": sumber_dana or "",
+    }
+    if filters["tahun"] == "2026":
+        filters["tahun"] = ""
+    return {key: value for key, value in filters.items() if value}
+
+
+def build_main_page_message(query_string: str = "") -> bytes:
     return _field_bytes(
         11,
         b"".join(
             [
-                _field_bytes(1, ""),
+                _field_bytes(1, query_string),
                 _field_bytes(2, b""),
                 _field_bytes(3, b""),
                 _field_bytes(4, "rup"),
-                _field_bytes(8, _build_context_info()),
+                _field_bytes(8, _build_context_info(_app_url(query_string))),
             ]
         ),
     )
 
 
-def build_button_click_message(widget_id: str) -> bytes:
+def build_button_click_message(widget_id: str, query_string: str = "") -> bytes:
     widget_state = _field_bytes(
         1,
         b"".join(
@@ -98,18 +156,18 @@ def build_button_click_message(widget_id: str) -> bytes:
         11,
         b"".join(
             [
-                _field_bytes(1, ""),
+                _field_bytes(1, query_string),
                 _field_bytes(2, widget_state),
                 _field_bytes(3, PAGE_SCRIPT_HASH),
                 _field_bytes(4, b""),
                 _field_bytes(5, b""),
-                _field_bytes(8, _build_context_info()),
+                _field_bytes(8, _build_context_info(_app_url(query_string))),
             ]
         ),
     )
 
 
-def build_entry_per_page_message(page_size: int) -> bytes:
+def build_entry_per_page_message(page_size: int, query_string: str = "") -> bytes:
     if page_size not in {20, 50, 100}:
         raise ValueError("page_size must be one of: 20, 50, 100")
     widget_state = _field_bytes(
@@ -125,8 +183,51 @@ def build_entry_per_page_message(page_size: int) -> bytes:
         11,
         b"".join(
             [
-                _field_bytes(1, ""),
+                _field_bytes(1, query_string),
                 _field_bytes(2, widget_state),
+                _field_bytes(3, PAGE_SCRIPT_HASH),
+                _field_bytes(4, b""),
+                _field_bytes(5, b""),
+                _field_bytes(8, _build_context_info(_app_url(query_string))),
+            ]
+        ),
+    )
+
+
+def _select_state(widget_id: str, value: str) -> bytes:
+    return _field_bytes(
+        1,
+        b"".join(
+            [
+                _field_bytes(1, widget_id),
+                _field_bytes(6, value),
+            ]
+        ),
+    )
+
+
+def build_listing_filter_state_message(
+    page_size: int = 100,
+    tahun: str | None = None,
+    jenis_klpd: str | int | None = None,
+    sumber: str | None = None,
+    sumber_dana: str | None = None,
+) -> bytes:
+    states = [_select_state(ENTRY_PER_PAGE_WIDGET_ID, str(page_size))]
+    if tahun:
+        states.append(_select_state(TAHUN_WIDGET_ID, str(tahun)))
+    if jenis_klpd:
+        states.append(_select_state(JENIS_KLPD_WIDGET_ID, JENIS_KLPD_VALUES[str(jenis_klpd)]))
+    if sumber:
+        states.append(_select_state(CARA_PENGADAAN_WIDGET_ID, sumber))
+    if sumber_dana:
+        states.append(_select_state(SUMBER_DANA_WIDGET_ID, sumber_dana))
+    return _field_bytes(
+        11,
+        b"".join(
+            [
+                _field_bytes(1, ""),
+                _field_bytes(2, b"".join(states)),
                 _field_bytes(3, PAGE_SCRIPT_HASH),
                 _field_bytes(4, b""),
                 _field_bytes(5, b""),
@@ -136,13 +237,13 @@ def build_entry_per_page_message(page_size: int) -> bytes:
     )
 
 
-def _build_context_info() -> bytes:
+def _build_context_info(url: str = APP_URL) -> bytes:
     return b"".join(
         [
             _field_bytes(1, "UTC"),
             _field_varint(2, 0),
             _field_bytes(3, "en-US"),
-            _field_bytes(4, APP_URL),
+            _field_bytes(4, url),
             _field_varint(5, 0),
             _field_bytes(6, "light"),
         ]
@@ -222,6 +323,25 @@ def extract_page_info_from_payload(payload: bytes) -> dict[str, int] | None:
         "page": int(match.group(1).replace(".", "")),
         "total_pages": int(match.group(2).replace(".", "")),
     }
+
+
+def listing_row_matches_filters(row: dict[str, str], filters: dict[str, str]) -> bool:
+    if filters.get("tahun") and row.get("Tahun Anggaran") != filters["tahun"]:
+        return False
+    if filters.get("sumber") and row.get("Cara Pengadaan") != filters["sumber"]:
+        return False
+    if filters.get("sumber_dana") and row.get("Sumber Dana") != filters["sumber_dana"]:
+        return False
+    jenis_klpd = filters.get("jenis_klpd")
+    if jenis_klpd:
+        nama_instansi = row.get("Nama Instansi", "").upper()
+        if not nama_instansi.startswith(JENIS_KLPD_PREFIXES[jenis_klpd]):
+            return False
+    return True
+
+
+def listing_rows_match_filters(rows: list[dict[str, str]], filters: dict[str, str]) -> bool:
+    return bool(rows) and all(listing_row_matches_filters(row, filters) for row in rows)
 
 
 def parse_kode_lines(lines: list[str]) -> list[str]:
@@ -309,6 +429,8 @@ async def _read_listing_page(
     target_page: int,
     timeout: float,
     settle_seconds: float = 1.0,
+    expected_rows: int | None = None,
+    expected_filters: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     deadline = asyncio.get_event_loop().time() + timeout
     last_listing: dict[str, Any] | None = None
@@ -339,7 +461,17 @@ async def _read_listing_page(
             page_info = info
             if info["page"] == target_page:
                 matched_at = asyncio.get_event_loop().time()
-        if matched_at and last_listing and asyncio.get_event_loop().time() - matched_at >= settle_seconds:
+        has_expected_rows = (
+            expected_rows is None
+            or last_listing is not None
+            and len(last_listing.get("rows", [])) >= expected_rows
+        )
+        has_expected_filters = (
+            not expected_filters
+            or last_listing is not None
+            and listing_rows_match_filters(last_listing.get("rows", []), expected_filters)
+        )
+        if matched_at and last_listing and has_expected_rows and has_expected_filters and asyncio.get_event_loop().time() - matched_at >= settle_seconds:
             break
 
     if not page_info or page_info["page"] != target_page or not last_listing:
@@ -347,6 +479,20 @@ async def _read_listing_page(
             "page": target_page,
             "status": "error",
             "error": f"did not receive listing page {target_page}",
+            "rows": [],
+        }
+    if expected_rows is not None and len(last_listing.get("rows", [])) < expected_rows:
+        return {
+            "page": target_page,
+            "status": "error",
+            "error": f"did not receive listing page {target_page} with {expected_rows} rows",
+            "rows": [],
+        }
+    if expected_filters and not listing_rows_match_filters(last_listing.get("rows", []), expected_filters):
+        return {
+            "page": target_page,
+            "status": "error",
+            "error": f"did not receive listing page {target_page} matching filters",
             "rows": [],
         }
 
@@ -363,6 +509,8 @@ async def scrape_listing_pages(
     timeout: float = 20.0,
     page_size: int = 100,
     start_page: int = 1,
+    query_string: str = "",
+    listing_filters: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     return [
         page_result
@@ -371,6 +519,8 @@ async def scrape_listing_pages(
             timeout=timeout,
             page_size=page_size,
             start_page=start_page,
+            query_string=query_string,
+            listing_filters=listing_filters,
         )
     ]
 
@@ -380,6 +530,8 @@ async def iter_scrape_listing_pages(
     timeout: float = 20.0,
     page_size: int = 100,
     start_page: int = 1,
+    query_string: str = "",
+    listing_filters: dict[str, str] | None = None,
 ):
     if pages < 1:
         return
@@ -388,7 +540,7 @@ async def iter_scrape_listing_pages(
 
     headers = {
         "Origin": "https://data.inaproc.id",
-        "Referer": APP_URL,
+        "Referer": _app_url(query_string),
         "User-Agent": (
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
@@ -404,15 +556,30 @@ async def iter_scrape_listing_pages(
         max_size=50_000_000,
     ) as ws:
         end_page = start_page + pages - 1
-        await ws.send(build_main_page_message())
+        listing_filters = {key: value for key, value in (listing_filters or {}).items() if value}
+        use_state_filters = bool(listing_filters.get("tahun"))
+        initial_query = "" if use_state_filters else query_string
+        await ws.send(build_main_page_message(initial_query))
         if page_size != 20:
             await _read_listing_page(ws, 1, timeout)
-            await ws.send(build_entry_per_page_message(page_size))
-        page_result = await _read_listing_page(ws, 1, timeout)
+            if use_state_filters:
+                await ws.send(build_listing_filter_state_message(page_size=page_size, **listing_filters))
+            else:
+                await ws.send(build_entry_per_page_message(page_size, query_string))
+        elif use_state_filters:
+            await _read_listing_page(ws, 1, timeout)
+            await ws.send(build_listing_filter_state_message(page_size=page_size, **listing_filters))
+        page_result = await _read_listing_page(
+            ws,
+            1,
+            timeout,
+            expected_rows=page_size if page_size != 20 else None,
+            expected_filters=listing_filters if use_state_filters else None,
+        )
         if start_page == 1:
             yield page_result
         for page in range(2, end_page + 1):
-            await ws.send(build_button_click_message(NEXT_PAGE_WIDGET_ID))
+            await ws.send(build_button_click_message(NEXT_PAGE_WIDGET_ID, initial_query))
             page_result = await _read_listing_page(ws, page, timeout)
             if page >= start_page:
                 yield page_result
@@ -502,14 +669,32 @@ def main() -> None:
     parser.add_argument("--list-pages", type=int, help="Scrape N listing pages from /rup instead of detail pages.")
     parser.add_argument("--page-size", type=int, default=100, choices=[20, 50, 100])
     parser.add_argument("--start-page", type=int, default=1, help="First listing page to emit when using --list-pages.")
+    parser.add_argument("--tahun", help="Listing filter, e.g. 2026.")
+    parser.add_argument("--jenis-klpd", choices=["1", "2", "3", "4", "5"], help="Listing filter: 1 Kementerian, 2 Lembaga, 3 Provinsi, 4 Kabupaten, 5 Kota.")
+    parser.add_argument("--sumber", choices=["Penyedia", "Swakelola"], help="Listing filter for Cara Pengadaan.")
+    parser.add_argument("--sumber-dana", choices=["APBN", "APBNP", "APBD", "APBDP", "PHLN", "PNBP", "BLUD", "GABUNGAN", "LAINNYA"], help="Listing filter for Sumber Dana.")
     args = parser.parse_args()
     if args.list_pages:
+        listing_filters = effective_listing_filters(
+            tahun=args.tahun,
+            jenis_klpd=args.jenis_klpd,
+            sumber=args.sumber,
+            sumber_dana=args.sumber_dana,
+        )
+        query_string = build_listing_query(
+            tahun=listing_filters.get("tahun"),
+            jenis_klpd=listing_filters.get("jenis_klpd"),
+            sumber=listing_filters.get("sumber"),
+            sumber_dana=listing_filters.get("sumber_dana"),
+        )
         results = asyncio.run(
             scrape_listing_pages(
                 args.list_pages,
                 timeout=args.timeout,
                 page_size=args.page_size,
                 start_page=args.start_page,
+                query_string=query_string,
+                listing_filters=listing_filters,
             )
         )
         _write_listing_results(results, args.output)

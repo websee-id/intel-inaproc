@@ -2,12 +2,18 @@ import asyncio
 import unittest
 
 from inaproc_ws_scraper import (
+    build_button_click_message,
     build_entry_per_page_message,
+    build_listing_filter_state_message,
+    build_listing_query,
+    build_main_page_message,
     build_rerun_message,
+    effective_listing_filters,
     extract_page_info_from_payload,
     extract_tables_from_payload,
     flatten_result,
     iter_scrape_listing_pages,
+    listing_rows_match_filters,
     parse_kode_lines,
     scrape_with_retries,
 )
@@ -96,6 +102,67 @@ class InaprocWsScraperTest(unittest.TestCase):
         self.assertIn(b"$$ID-7ffea71d800559f7b6f8922dca5b713e-None", msg)
         self.assertIn(b"100", msg)
         self.assertIn(b"cf49de8dce0882063532bfe93fe34a29", msg)
+
+    def test_builds_listing_query_for_shard_filters(self):
+        query = build_listing_query(
+            tahun="2026",
+            jenis_klpd="4",
+            sumber="Penyedia",
+            sumber_dana="APBD",
+        )
+
+        self.assertEqual(query, "tahun=2026&jenis_klpd=4&sumber=Penyedia&sumber_dana=APBD")
+
+    def test_effective_listing_filters_omit_default_tahun(self):
+        self.assertEqual(
+            effective_listing_filters(tahun="2026", jenis_klpd="4", sumber_dana="APBD"),
+            {"jenis_klpd": "4", "sumber_dana": "APBD"},
+        )
+        self.assertEqual(effective_listing_filters(tahun="2025"), {"tahun": "2025"})
+
+    def test_listing_widget_messages_preserve_shard_query(self):
+        query = "tahun=2026&jenis_klpd=4&sumber_dana=APBD"
+
+        main_msg = build_main_page_message(query)
+        size_msg = build_entry_per_page_message(100, query)
+        next_msg = build_button_click_message("next-widget", query)
+
+        for msg in [main_msg, size_msg, next_msg]:
+            self.assertIn(query.encode("utf-8"), msg)
+            self.assertIn(f"https://data.inaproc.id/rup?{query}".encode("utf-8"), msg)
+
+    def test_builds_listing_filter_state_message(self):
+        msg = build_listing_filter_state_message(
+            page_size=100,
+            tahun="2025",
+            jenis_klpd="4",
+            sumber="Penyedia",
+            sumber_dana="APBD",
+        )
+
+        self.assertIn(b"2025", msg)
+        self.assertIn(b"Kabupaten", msg)
+        self.assertIn(b"Penyedia", msg)
+        self.assertIn(b"APBD", msg)
+        self.assertIn(b"100", msg)
+
+    def test_listing_rows_match_filters(self):
+        rows = [
+            {
+                "Nama Instansi": "KAB. SUBANG",
+                "Tahun Anggaran": "2026",
+                "Cara Pengadaan": "Penyedia",
+                "Sumber Dana": "APBD",
+            }
+        ]
+
+        self.assertTrue(
+            listing_rows_match_filters(
+                rows,
+                {"tahun": "2026", "jenis_klpd": "4", "sumber": "Penyedia", "sumber_dana": "APBD"},
+            )
+        )
+        self.assertFalse(listing_rows_match_filters(rows, {"jenis_klpd": "5"}))
 
     def test_parse_kode_lines_ignores_blanks_comments_and_duplicates(self):
         lines = ["64228258\n", "  # note\n", "\n", "64228259,extra\n", "64228258\n"]

@@ -18,7 +18,7 @@ from inaproc_pipeline import (
     row_hash,
     utc_now,
 )
-from inaproc_ws_scraper import iter_scrape_listing_pages, scrape_detail, scrape_listing_pages
+from inaproc_ws_scraper import effective_listing_filters, build_listing_query, iter_scrape_listing_pages, scrape_detail, scrape_listing_pages
 
 
 LISTING_COPY_COLUMNS = [
@@ -715,8 +715,28 @@ async def run_seed_listing_file(args: argparse.Namespace) -> dict[str, Any]:
     output = Path(args.output)
     if args.truncate and output.exists():
         output.unlink()
+    listing_filters = effective_listing_filters(
+        tahun=args.tahun,
+        jenis_klpd=args.jenis_klpd,
+        sumber=args.sumber,
+        sumber_dana=args.sumber_dana,
+    )
+    query_string = build_listing_query(
+        tahun=listing_filters.get("tahun"),
+        jenis_klpd=listing_filters.get("jenis_klpd"),
+        sumber=listing_filters.get("sumber"),
+        sumber_dana=listing_filters.get("sumber_dana"),
+    )
     run_id = str(uuid4())
-    stats = {"run_id": run_id, "status": "ok", "pages": 0, "rows": 0, "errors": 0, "output": str(output)}
+    stats = {
+        "run_id": run_id,
+        "status": "ok",
+        "pages": 0,
+        "rows": 0,
+        "errors": 0,
+        "output": str(output),
+        "query_string": query_string,
+    }
     try:
         pages = listing_page_range(args.max_pages, start_page=args.start_page, end_page=args.end_page)
         if pages:
@@ -725,6 +745,8 @@ async def run_seed_listing_file(args: argparse.Namespace) -> dict[str, Any]:
                 timeout=args.timeout,
                 page_size=args.page_size,
                 start_page=pages[0],
+                query_string=query_string,
+                listing_filters=listing_filters,
             ):
                 stats["pages"] += 1
                 if page_result.get("status") != "ok":
@@ -739,6 +761,7 @@ async def run_seed_listing_file(args: argparse.Namespace) -> dict[str, Any]:
                             "rows": len(page_result["rows"]),
                             "total_rows": stats["rows"],
                             "total_pages": page_result.get("total_pages"),
+                            "query_string": query_string,
                         },
                         ensure_ascii=False,
                     ),
@@ -746,6 +769,8 @@ async def run_seed_listing_file(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 if args.rate_delay:
                     await asyncio.sleep(args.rate_delay)
+                if page_result.get("total_pages") and page_result["page"] >= page_result["total_pages"]:
+                    break
     except Exception as exc:  # noqa: BLE001 - command returns operational failure.
         stats["status"] = "error"
         stats["error"] = str(exc)
@@ -811,6 +836,10 @@ def main() -> None:
     seed_file.add_argument("--timeout", type=float, default=20.0)
     seed_file.add_argument("--rate-delay", type=float, default=0.0)
     seed_file.add_argument("--truncate", action="store_true")
+    seed_file.add_argument("--tahun")
+    seed_file.add_argument("--jenis-klpd", choices=["1", "2", "3", "4", "5"])
+    seed_file.add_argument("--sumber", choices=["Penyedia", "Swakelola"])
+    seed_file.add_argument("--sumber-dana", choices=["APBN", "APBNP", "APBD", "APBDP", "PHLN", "PNBP", "BLUD", "GABUNGAN", "LAINNYA"])
 
     prepare_copy = sub.add_parser("prepare-listing-copy")
     prepare_copy.add_argument("--input", required=True)

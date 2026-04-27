@@ -3,6 +3,7 @@ __pycache__/
 *.sqlite
 *.sqlite-*
 .playwright-mcp/
+.playwright-cli/
 archives/
 logs/
 browser_fallback_report.json
