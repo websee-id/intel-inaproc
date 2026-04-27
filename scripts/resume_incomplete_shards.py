@@ -36,8 +36,10 @@ def parse_log(path: Path) -> dict:
     total_pages = (last or {}).get("total_pages") or 0
     status = (final or {}).get("status")
     errors = (final or {}).get("errors") or 0
+    rows = (last or {}).get("total_rows") or (final or {}).get("rows") or 0
     complete = bool(status == "ok" and errors == 0 and total_pages and page >= total_pages)
-    return {"page": page, "total_pages": total_pages, "complete": complete, "status": status, "errors": errors}
+    empty = bool(status == "ok" and rows == 0 and errors > 0 and not total_pages)
+    return {"page": page, "total_pages": total_pages, "complete": complete, "status": status, "errors": errors, "rows": rows, "empty": empty}
 
 
 def base_shards() -> list[dict]:
@@ -67,7 +69,11 @@ def incomplete_jobs() -> list[dict]:
     jobs = []
     for job in base_shards() + instansi_shards():
         state = parse_log(job["log_dir"] / f"{job['name']}.log")
+        if state["empty"]:
+            continue
         if state["complete"]:
+            continue
+        if not state["total_pages"] and state["rows"] == 0:
             continue
         if state["total_pages"] and state["page"] >= state["total_pages"] and state["errors"] == 0:
             continue
