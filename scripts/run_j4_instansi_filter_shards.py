@@ -72,7 +72,7 @@ def code_is_done(shard: str, max_attempts: int) -> tuple[bool, str]:
     return False, "pending"
 
 
-def launch(code: str, sumber: str, dana: str, timeout: float) -> subprocess.Popen:
+def launch(code: str, sumber: str, dana: str, timeout: float) -> tuple[subprocess.Popen, Path, Path]:
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     stamp = utc_stamp()
@@ -104,7 +104,7 @@ def launch(code: str, sumber: str, dana: str, timeout: float) -> subprocess.Pope
         dana,
         "--truncate",
     ]
-    return subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
+    return subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT), output, log_path
 
 
 def stop_child(proc: subprocess.Popen, grace_seconds: float = 5.0) -> None:
@@ -118,13 +118,23 @@ def stop_child(proc: subprocess.Popen, grace_seconds: float = 5.0) -> None:
         proc.wait()
 
 
+def latest_activity(paths: list[Path], fallback: float) -> float:
+    latest = fallback
+    for path in paths:
+        try:
+            latest = max(latest, path.stat().st_mtime)
+        except FileNotFoundError:
+            continue
+    return latest
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run j4 Kabupaten shards split by instansi code for one sumber/sumber_dana filter.")
     parser.add_argument("--sumber", required=True, choices=["Penyedia", "Swakelola"])
     parser.add_argument("--sumber-dana", required=True, choices=["APBN", "APBNP", "APBD", "APBDP", "PHLN", "PNBP", "BLUD", "GABUNGAN", "LAINNYA"])
     parser.add_argument("--max-parallel", type=int, default=int(os.environ.get("MAX_PARALLEL", "20")))
     parser.add_argument("--max-attempts", type=int, default=3)
-    parser.add_argument("--child-timeout", type=float, default=300.0)
+    parser.add_argument("--child-timeout", type=float, default=300.0, help="Kill a child only after this many seconds without output/log activity.")
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--limit", type=int, help="Limit number of codes for testing.")
     args = parser.parse_args()
@@ -139,7 +149,7 @@ def main() -> None:
         status_counts[status] += 1
         if not done:
             pending.append(code)
-    children: dict[str, tuple[subprocess.Popen, float]] = {}
+    children: dict[str, tuple[subprocess.Popen, float, Path, Path]] = {}
     print(
         json.dumps(
             {
@@ -157,11 +167,12 @@ def main() -> None:
 
     while pending or children:
         now = time.monotonic()
-        for code, (proc, started_at) in list(children.items()):
+        for code, (proc, started_at, output_path, log_path) in list(children.items()):
             if proc.poll() is not None:
                 children.pop(code)
                 continue
-            if now - started_at >= args.child_timeout:
+            last_activity = latest_activity([output_path, log_path], started_at)
+            if time.time() - last_activity >= args.child_timeout:
                 stop_child(proc)
                 children.pop(code)
                 print(
@@ -172,13 +183,15 @@ def main() -> None:
                             "sumber": args.sumber,
                             "sumber_dana": args.sumber_dana,
                             "child_timeout": args.child_timeout,
+                            "idle_seconds": int(time.time() - last_activity),
                         }
                     ),
                     flush=True,
                 )
         while pending and len(children) < args.max_parallel:
             code = pending.pop(0)
-            children[code] = (launch(code, args.sumber, args.sumber_dana, args.timeout), time.monotonic())
+            proc, output_path, log_path = launch(code, args.sumber, args.sumber_dana, args.timeout)
+            children[code] = (proc, time.time(), output_path, log_path)
             print(json.dumps({"event": "instansi-filter-start", "code": code, "sumber": args.sumber, "sumber_dana": args.sumber_dana}), flush=True)
         time.sleep(5)
 
