@@ -48,6 +48,26 @@ def parse_final_log(path: Path) -> dict:
         return {}
 
 
+def parse_seed_progress(path: Path) -> tuple[int, int | None, int]:
+    last_page = 0
+    total_pages = None
+    rows = 0
+    if not path.exists():
+        return last_page, total_pages, rows
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if '"event": "seed-page"' not in line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        last_page = max(last_page, int(event.get("page") or 0))
+        if event.get("total_pages"):
+            total_pages = int(event["total_pages"])
+        rows += int(event.get("rows") or 0)
+    return last_page, total_pages, rows
+
+
 def final_logs(shard: str) -> list[dict]:
     finals = []
     for path in LOG_DIR.glob(f"{shard}-*.log"):
@@ -57,8 +77,24 @@ def final_logs(shard: str) -> list[dict]:
     return finals
 
 
+def shard_logs(shard: str) -> list[Path]:
+    return sorted(LOG_DIR.glob(f"{shard}-*.log"), key=lambda path: path.stat().st_mtime)
+
+
 def code_is_done(shard: str, max_attempts: int) -> tuple[bool, str]:
-    finals = final_logs(shard)
+    logs = shard_logs(shard)
+    completed_pages: set[int] = set()
+    known_total_pages = None
+    finals = []
+    for path in logs:
+        last_page, total_pages, _rows = parse_seed_progress(path)
+        if total_pages:
+            known_total_pages = max(known_total_pages or 0, total_pages)
+        if last_page:
+            completed_pages.update(range(1, last_page + 1))
+        final = parse_final_log(path)
+        if final:
+            finals.append(final)
     for final in finals:
         if (
             final.get("status") == "ok"
@@ -67,17 +103,29 @@ def code_is_done(shard: str, max_attempts: int) -> tuple[bool, str]:
             and int(final.get("rows") or 0) > 0
         ):
             return True, "completed"
+    if known_total_pages and all(page in completed_pages for page in range(1, known_total_pages + 1)):
+        return True, "completed"
     if len(finals) >= max_attempts:
         return True, "exhausted"
     return False, "pending"
 
 
-def launch(code: str, sumber: str, dana: str, timeout: float) -> tuple[subprocess.Popen, Path, Path]:
+def next_start_page(shard: str) -> int:
+    last_page = 0
+    for path in shard_logs(shard):
+        page, _total_pages, _rows = parse_seed_progress(path)
+        last_page = max(last_page, page)
+    return last_page + 1
+
+
+def launch(code: str, sumber: str, dana: str, timeout: float) -> tuple[subprocess.Popen, Path, Path, int]:
     ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     stamp = utc_stamp()
     shard = f"y2026-j4-{sumber}-{dana}-{code}"
-    output = ARCHIVE_DIR / f"{shard}-{stamp}.jsonl"
+    start_page = next_start_page(shard)
+    suffix = f"from-{start_page}-{stamp}" if start_page > 1 else stamp
+    output = ARCHIVE_DIR / f"{shard}-{suffix}.jsonl"
     log_path = LOG_DIR / f"{shard}-{stamp}.log"
     log = log_path.open("w", encoding="utf-8")
     cmd = [
@@ -92,6 +140,8 @@ def launch(code: str, sumber: str, dana: str, timeout: float) -> tuple[subproces
         "100",
         "--timeout",
         str(timeout),
+        "--start-page",
+        str(start_page),
         "--tahun",
         "2026",
         "--jenis-klpd",
@@ -104,7 +154,7 @@ def launch(code: str, sumber: str, dana: str, timeout: float) -> tuple[subproces
         dana,
         "--truncate",
     ]
-    return subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT), output, log_path
+    return subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT), output, log_path, start_page
 
 
 def stop_child(proc: subprocess.Popen, grace_seconds: float = 5.0) -> None:
@@ -190,9 +240,9 @@ def main() -> None:
                 )
         while pending and len(children) < args.max_parallel:
             code = pending.pop(0)
-            proc, output_path, log_path = launch(code, args.sumber, args.sumber_dana, args.timeout)
+            proc, output_path, log_path, start_page = launch(code, args.sumber, args.sumber_dana, args.timeout)
             children[code] = (proc, time.time(), output_path, log_path)
-            print(json.dumps({"event": "instansi-filter-start", "code": code, "sumber": args.sumber, "sumber_dana": args.sumber_dana}), flush=True)
+            print(json.dumps({"event": "instansi-filter-start", "code": code, "start_page": start_page, "sumber": args.sumber, "sumber_dana": args.sumber_dana}), flush=True)
         time.sleep(5)
 
 
