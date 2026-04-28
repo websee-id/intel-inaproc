@@ -243,14 +243,7 @@ sudo systemctl enable --now inaproc-worker@04
 For the large `jenis_klpd=4` shards that are split by `instansi=Dxxx`, run the watchdog instead of manually checking every few minutes:
 
 ```bash
-setsid python3 -u scripts/watch_j4_instansi_filters.py \
-  --interval 300 \
-  --max-parallel 6 \
-  --max-attempts 3 \
-  --child-timeout 300 \
-  --restart-stale \
-  --stale-minutes 15 \
-  >> logs/instansi-filter-shards/watchdog-daemon.log 2>&1 < /dev/null &
+setsid scripts/run_j4_watchdog_forever.sh > /dev/null 2>&1 < /dev/null &
 ```
 
 What it does:
@@ -272,7 +265,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=/opt/intel-inaproc
-ExecStart=/opt/intel-inaproc/.venv/bin/python -u /opt/intel-inaproc/scripts/watch_j4_instansi_filters.py --interval 300 --max-parallel 6 --max-attempts 3 --child-timeout 300 --restart-stale --stale-minutes 15
+ExecStart=/opt/intel-inaproc/scripts/run_j4_watchdog_forever.sh
 Restart=always
 RestartSec=10
 
