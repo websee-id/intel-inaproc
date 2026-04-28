@@ -40,7 +40,7 @@ def parse_log(path: Path) -> dict:
     errors = (final or {}).get("errors") or 0
     rows = (last or {}).get("total_rows") or (final or {}).get("rows") or 0
     complete = bool(status == "ok" and errors == 0 and total_pages and page >= total_pages)
-    empty = bool(status == "ok" and rows == 0 and errors > 0 and not total_pages)
+    empty = bool(status == "ok" and rows == 0 and not page and not total_pages)
     return {"page": page, "total_pages": total_pages, "complete": complete, "status": status, "errors": errors, "rows": rows, "empty": empty}
 
 
