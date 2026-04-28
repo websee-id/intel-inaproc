@@ -48,12 +48,28 @@ def parse_final_log(path: Path) -> dict:
         return {}
 
 
-def completed_log_exists(shard: str) -> bool:
+def final_logs(shard: str) -> list[dict]:
+    finals = []
     for path in LOG_DIR.glob(f"{shard}-*.log"):
         final = parse_final_log(path)
-        if final.get("status") == "ok" and int(final.get("errors") or 0) == 0 and int(final.get("pages") or 0) > 0:
-            return True
-    return False
+        if final:
+            finals.append(final)
+    return finals
+
+
+def code_is_done(shard: str, max_attempts: int) -> tuple[bool, str]:
+    finals = final_logs(shard)
+    for final in finals:
+        if (
+            final.get("status") == "ok"
+            and int(final.get("errors") or 0) == 0
+            and int(final.get("pages") or 0) > 0
+            and int(final.get("rows") or 0) > 0
+        ):
+            return True, "completed"
+    if len(finals) >= max_attempts:
+        return True, "exhausted"
+    return False, "pending"
 
 
 def launch(code: str, sumber: str, dana: str, timeout: float) -> subprocess.Popen:
@@ -96,6 +112,7 @@ def main() -> None:
     parser.add_argument("--sumber", required=True, choices=["Penyedia", "Swakelola"])
     parser.add_argument("--sumber-dana", required=True, choices=["APBN", "APBNP", "APBD", "APBDP", "PHLN", "PNBP", "BLUD", "GABUNGAN", "LAINNYA"])
     parser.add_argument("--max-parallel", type=int, default=int(os.environ.get("MAX_PARALLEL", "20")))
+    parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--limit", type=int, help="Limit number of codes for testing.")
     args = parser.parse_args()
@@ -103,13 +120,28 @@ def main() -> None:
     codes = load_codes()
     if args.limit:
         codes = codes[: args.limit]
-    pending = [
-        code
-        for code in codes
-        if not completed_log_exists(f"y2026-j4-{args.sumber}-{args.sumber_dana}-{code}")
-    ]
+    status_counts = {"completed": 0, "exhausted": 0, "pending": 0}
+    pending = []
+    for code in codes:
+        done, status = code_is_done(f"y2026-j4-{args.sumber}-{args.sumber_dana}-{code}", args.max_attempts)
+        status_counts[status] += 1
+        if not done:
+            pending.append(code)
     children: dict[str, subprocess.Popen] = {}
-    print(json.dumps({"event": "instansi-filter-manifest", "jobs": len(pending), "max_parallel": args.max_parallel, "sumber": args.sumber, "sumber_dana": args.sumber_dana}), flush=True)
+    print(
+        json.dumps(
+            {
+                "event": "instansi-filter-manifest",
+                "jobs": len(pending),
+                "max_parallel": args.max_parallel,
+                "max_attempts": args.max_attempts,
+                "sumber": args.sumber,
+                "sumber_dana": args.sumber_dana,
+                **status_counts,
+            }
+        ),
+        flush=True,
+    )
 
     while pending or children:
         for code, proc in list(children.items()):

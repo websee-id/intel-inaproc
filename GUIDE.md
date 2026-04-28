@@ -238,6 +238,53 @@ sudo systemctl enable --now inaproc-worker@03
 sudo systemctl enable --now inaproc-worker@04
 ```
 
+## 9. Sharded Listing Watchdog
+
+For the large `jenis_klpd=4` shards that are split by `instansi=Dxxx`, run the watchdog instead of manually checking every few minutes:
+
+```bash
+setsid python3 -u scripts/watch_j4_instansi_filters.py \
+  --interval 300 \
+  --max-parallel 6 \
+  --max-attempts 3 \
+  --restart-stale \
+  --stale-minutes 15 \
+  >> logs/instansi-filter-shards/watchdog-daemon.log 2>&1 < /dev/null &
+```
+
+What it does:
+
+- checks every 5 minutes;
+- restarts a filter when it is stale;
+- stops rerunning a code after `--max-attempts`;
+- records per-filter status in `logs/instansi-filter-shards/watchdog.log`.
+
+For production, prefer systemd so it survives logout and reboot.
+
+`/etc/systemd/system/inaproc-j4-watchdog.service`:
+
+```ini
+[Unit]
+Description=INAPROC j4 instansi listing watchdog
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/intel-inaproc
+ExecStart=/opt/intel-inaproc/.venv/bin/python -u /opt/intel-inaproc/scripts/watch_j4_instansi_filters.py --interval 300 --max-parallel 6 --max-attempts 3 --restart-stale --stale-minutes 15
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable it:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now inaproc-j4-watchdog
+```
+
 ## 9. Health Checks
 
 WebSocket probe:
