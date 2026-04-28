@@ -123,7 +123,7 @@ def count_split_files() -> dict[str, int]:
     }
 
 
-def start_runner(sumber: str, dana: str, max_parallel: int, max_attempts: int, timeout: float) -> str:
+def start_runner(sumber: str, dana: str, max_parallel: int, max_attempts: int, child_timeout: float, timeout: float) -> str:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     stamp = utc_stamp()
     log_path = LOG_DIR / f"supervisor-j4-{sumber.lower()}-{dana.lower()}-{stamp}.log"
@@ -140,6 +140,8 @@ def start_runner(sumber: str, dana: str, max_parallel: int, max_attempts: int, t
                 str(max_parallel),
                 "--max-attempts",
                 str(max_attempts),
+                "--child-timeout",
+                str(child_timeout),
                 "--timeout",
                 str(timeout),
             ],
@@ -191,13 +193,13 @@ def run_once(args: argparse.Namespace) -> None:
             log_event({**event, "action": "done"})
             continue
         if runners == 0 and workers == 0:
-            log_path = start_runner(sumber, dana, args.max_parallel, args.max_attempts, args.timeout)
+            log_path = start_runner(sumber, dana, args.max_parallel, args.max_attempts, args.child_timeout, args.timeout)
             log_event({**event, "action": "started", "log": log_path})
             continue
         if args.restart_stale and stale:
             stop_filter(sumber, dana)
             time.sleep(args.restart_delay)
-            log_path = start_runner(sumber, dana, args.max_parallel, args.max_attempts, args.timeout)
+            log_path = start_runner(sumber, dana, args.max_parallel, args.max_attempts, args.child_timeout, args.timeout)
             log_event({**event, "action": "restarted-stale", "log": log_path})
             continue
         log_event({**event, "action": "keep-running"})
@@ -208,6 +210,7 @@ def main() -> None:
     parser.add_argument("--interval", type=int, default=300)
     parser.add_argument("--max-parallel", type=int, default=6)
     parser.add_argument("--max-attempts", type=int, default=3)
+    parser.add_argument("--child-timeout", type=float, default=300.0)
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--stale-minutes", type=int, default=15)
     parser.add_argument("--restart-stale", action="store_true")

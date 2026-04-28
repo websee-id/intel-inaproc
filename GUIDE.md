@@ -247,6 +247,7 @@ setsid python3 -u scripts/watch_j4_instansi_filters.py \
   --interval 300 \
   --max-parallel 6 \
   --max-attempts 3 \
+  --child-timeout 300 \
   --restart-stale \
   --stale-minutes 15 \
   >> logs/instansi-filter-shards/watchdog-daemon.log 2>&1 < /dev/null &
@@ -257,6 +258,7 @@ What it does:
 - checks every 5 minutes;
 - restarts a filter when it is stale;
 - stops rerunning a code after `--max-attempts`;
+- kills a stuck child scraper after `--child-timeout`;
 - records per-filter status in `logs/instansi-filter-shards/watchdog.log`.
 
 For production, prefer systemd so it survives logout and reboot.
@@ -270,7 +272,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=/opt/intel-inaproc
-ExecStart=/opt/intel-inaproc/.venv/bin/python -u /opt/intel-inaproc/scripts/watch_j4_instansi_filters.py --interval 300 --max-parallel 6 --max-attempts 3 --restart-stale --stale-minutes 15
+ExecStart=/opt/intel-inaproc/.venv/bin/python -u /opt/intel-inaproc/scripts/watch_j4_instansi_filters.py --interval 300 --max-parallel 6 --max-attempts 3 --child-timeout 300 --restart-stale --stale-minutes 15
 Restart=always
 RestartSec=10
 

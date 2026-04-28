@@ -107,12 +107,24 @@ def launch(code: str, sumber: str, dana: str, timeout: float) -> subprocess.Pope
     return subprocess.Popen(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
 
 
+def stop_child(proc: subprocess.Popen, grace_seconds: float = 5.0) -> None:
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run j4 Kabupaten shards split by instansi code for one sumber/sumber_dana filter.")
     parser.add_argument("--sumber", required=True, choices=["Penyedia", "Swakelola"])
     parser.add_argument("--sumber-dana", required=True, choices=["APBN", "APBNP", "APBD", "APBDP", "PHLN", "PNBP", "BLUD", "GABUNGAN", "LAINNYA"])
     parser.add_argument("--max-parallel", type=int, default=int(os.environ.get("MAX_PARALLEL", "20")))
     parser.add_argument("--max-attempts", type=int, default=3)
+    parser.add_argument("--child-timeout", type=float, default=300.0)
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--limit", type=int, help="Limit number of codes for testing.")
     args = parser.parse_args()
@@ -127,7 +139,7 @@ def main() -> None:
         status_counts[status] += 1
         if not done:
             pending.append(code)
-    children: dict[str, subprocess.Popen] = {}
+    children: dict[str, tuple[subprocess.Popen, float]] = {}
     print(
         json.dumps(
             {
@@ -144,12 +156,29 @@ def main() -> None:
     )
 
     while pending or children:
-        for code, proc in list(children.items()):
+        now = time.monotonic()
+        for code, (proc, started_at) in list(children.items()):
             if proc.poll() is not None:
                 children.pop(code)
+                continue
+            if now - started_at >= args.child_timeout:
+                stop_child(proc)
+                children.pop(code)
+                print(
+                    json.dumps(
+                        {
+                            "event": "instansi-filter-child-timeout",
+                            "code": code,
+                            "sumber": args.sumber,
+                            "sumber_dana": args.sumber_dana,
+                            "child_timeout": args.child_timeout,
+                        }
+                    ),
+                    flush=True,
+                )
         while pending and len(children) < args.max_parallel:
             code = pending.pop(0)
-            children[code] = launch(code, args.sumber, args.sumber_dana, args.timeout)
+            children[code] = (launch(code, args.sumber, args.sumber_dana, args.timeout), time.monotonic())
             print(json.dumps({"event": "instansi-filter-start", "code": code, "sumber": args.sumber, "sumber_dana": args.sumber_dana}), flush=True)
         time.sleep(5)
 
