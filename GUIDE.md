@@ -240,7 +240,7 @@ sudo systemctl enable --now inaproc-worker@04
 
 ## 9. Sharded Listing Watchdog
 
-For the large `jenis_klpd=4` shards that are split by `instansi=Dxxx`, run the watchdog instead of manually checking every few minutes:
+For the large `jenis_klpd=4` shards that are split by `instansi=Dxxx`, run the watchdog instead of manually checking every few minutes. By default it supervises `Penyedia/APBD`, `Swakelola/APBD`, and `Penyedia/BLUD`.
 
 ```bash
 setsid scripts/run_j4_watchdog_forever.sh > /dev/null 2>&1 < /dev/null &

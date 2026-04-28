@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ATTEMPT_DIR = ROOT / "archives" / "rup-attempts-2026"
 LOG_DIR = ROOT / "logs" / "instansi-filter-shards"
 WATCH_LOG = LOG_DIR / "watchdog.log"
-FILTERS = [("Swakelola", "APBD"), ("Penyedia", "BLUD")]
+FILTERS = [("Penyedia", "APBD"), ("Swakelola", "APBD"), ("Penyedia", "BLUD")]
 CODE_FILES = [
     ROOT / "archives" / "rup-sharded-2026" / "j4-penyedia-apbd-instansi-codes.jsonl",
     ROOT / "archives" / "rup-sharded-2026" / "j4-penyedia-apbd-instansi-codes-701-999.jsonl",
